@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Helm — Perpetual Pantries</title>
+<style>
+  :root{
+    --bg:#14171c; --surface:#1b1f26; --surface-2:#232833; --border:#2c323d;
+    --text:#e9e7e0; --text-dim:#9a9da6; --text-muted:#6d7280;
+    --amber:#c8934f; --amber-dim:#3a2f1e;
+    --teal:#4d9c8f; --teal-dim:#1c332f;
+    --red:#c25b52; --red-dim:#3a221f;
+    --serif:'Georgia','Times New Roman',serif;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);}
+  .app{max-width:1180px;margin:0 auto;padding:28px 24px 60px;}
+  header{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:1px solid var(--border);padding-bottom:18px;margin-bottom:22px;}
+  .brand{display:flex;flex-direction:column;gap:2px;}
+  .brand .eyebrow{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-muted);}
+  .brand h1{font-family:var(--serif);font-size:30px;font-weight:400;margin:0;letter-spacing:.01em;}
+  .brand .sub{font-size:13px;color:var(--text-dim);}
+  .status-pill{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-dim);border:1px solid var(--border);border-radius:20px;padding:6px 14px;}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--teal);}
+
+  nav{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:24px;flex-wrap:wrap;}
+  nav button{background:none;border:none;color:var(--text-muted);font-size:13px;padding:10px 16px;cursor:pointer;border-bottom:2px solid transparent;font-family:var(--sans);}
+  nav button.active{color:var(--text);border-bottom-color:var(--amber);}
+  nav button .badge{display:inline-block;margin-left:6px;background:var(--amber-dim);color:var(--amber);font-size:10px;padding:1px 6px;border-radius:10px;}
+
+  .panel{display:none;}
+  .panel.active{display:block;}
+
+  .grid{display:grid;gap:14px;}
+  .grid-4{grid-template-columns:repeat(4,1fr);}
+  .grid-2{grid-template-columns:1fr 1fr;}
+  @media(max-width:900px){.grid-4{grid-template-columns:repeat(2,1fr);}.grid-2{grid-template-columns:1fr;}}
+
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 18px;}
+  .metric-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:6px;}
+  .metric-value{font-family:var(--serif);font-size:26px;}
+  .metric-sub{font-size:12px;color:var(--text-dim);margin-top:4px;}
+
+  .section-title{font-family:var(--serif);font-size:18px;margin:28px 0 12px;color:var(--text);}
+  .section-title:first-child{margin-top:0;}
+
+  .row{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;padding:13px 0;border-bottom:1px solid var(--border);}
+  .row:last-child{border-bottom:none;}
+  .row-main{flex:1;min-width:0;}
+  .row-title{font-size:14px;color:var(--text);margin-bottom:3px;}
+  .row-detail{font-size:12.5px;color:var(--text-dim);line-height:1.5;}
+  .row-rec{font-size:12.5px;color:var(--amber);margin-top:6px;line-height:1.5;}
+
+  .tag{display:inline-block;font-size:10.5px;padding:2px 8px;border-radius:10px;margin-right:6px;white-space:nowrap;}
+  .tag-auto{background:var(--teal-dim);color:var(--teal);}
+  .tag-escalate{background:var(--amber-dim);color:var(--amber);}
+  .tag-status-ok{background:var(--teal-dim);color:var(--teal);}
+  .tag-status-due{background:var(--amber-dim);color:var(--amber);}
+  .tag-status-overdue{background:var(--red-dim);color:var(--red);}
+
+  .btn{background:none;border:1px solid var(--border);color:var(--text);font-size:12px;padding:6px 12px;border-radius:6px;cursor:pointer;font-family:var(--sans);white-space:nowrap;}
+  .btn:hover{border-color:var(--text-dim);}
+  .btn-approve{border-color:var(--teal);color:var(--teal);}
+  .btn-decline{border-color:var(--red);color:var(--red);}
+  .btn-group{display:flex;gap:6px;flex-shrink:0;}
+
+  .empty{color:var(--text-muted);font-size:13px;padding:24px 0;text-align:center;}
+
+  input,textarea,select{background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px 10px;font-size:13px;font-family:var(--sans);width:100%;}
+  textarea{resize:vertical;min-height:60px;}
+  label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);display:block;margin-bottom:5px;}
+  .field{margin-bottom:12px;}
+
+  .chat-log{display:flex;flex-direction:column;gap:12px;max-height:420px;overflow-y:auto;padding:4px 2px;margin-bottom:14px;}
+  .msg{max-width:80%;padding:10px 13px;border-radius:10px;font-size:13.5px;line-height:1.55;}
+  .msg.user{align-self:flex-end;background:var(--surface-2);border:1px solid var(--border);}
+  .msg.helm{align-self:flex-start;background:var(--amber-dim);color:var(--text);border:1px solid #4a3a24;}
+  .msg.system{align-self:center;color:var(--text-muted);font-size:11.5px;font-style:italic;}
+  .chat-input-row{display:flex;gap:8px;}
+  .chat-input-row input{flex:1;}
+  .chat-input-row button{background:var(--amber-dim);color:var(--amber);border:1px solid #4a3a24;border-radius:6px;padding:8px 16px;cursor:pointer;font-size:13px;}
+
+  .audit-entry{font-size:12px;color:var(--text-dim);padding:8px 0;border-bottom:1px solid var(--border);display:flex;gap:10px;}
+  .audit-entry:last-child{border-bottom:none;}
+  .audit-time{color:var(--text-muted);white-space:nowrap;}
+
+  .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:50;}
+  .modal{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:22px;width:420px;max-width:90vw;}
+  .modal h3{font-family:var(--serif);font-weight:400;margin:0 0 14px;font-size:18px;}
+  .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
+
+  .hint{font-size:11.5px;color:var(--text-muted);margin-top:-4px;margin-bottom:16px;}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header>
+    <div class="brand">
+      <span class="eyebrow">Perpetual Pantries</span>
+      <h1>Helm</h1>
+      <span class="sub">Company-wide oversight — sales, finance, governance</span>
+    </div>
+    <div class="status-pill"><span class="dot"></span><span id="storage-status">Loading…</span></div>
+  </header>
+
+  <nav>
+    <button class="active" data-panel="overview">Overview</button>
+    <button data-panel="escalations">Escalations<span class="badge" id="esc-badge" style="display:none"></span></button>
+    <button data-panel="sales">Sales &amp; growth</button>
+    <button data-panel="leads">Leads</button>
+    <button data-panel="finance">Finance</button>
+    <button data-panel="governance">Governance</button>
+    <button data-panel="agent">Ask Helm</button>
+    <button data-panel="log">Audit log</button>
+  </nav>
+
+  <!-- OVERVIEW -->
+  <div class="panel active" id="panel-overview">
+    <div class="grid grid-4">
+      <div class="card">
+        <div class="metric-label">Pipeline value</div>
+        <div class="metric-value" id="m-pipeline">—</div>
+        <div class="metric-sub" id="m-pipeline-sub">across open opportunities</div>
+      </div>
+      <div class="card">
+        <div class="metric-label">Cost of sale (tracked)</div>
+        <div class="metric-value" id="m-cos">—</div>
+        <div class="metric-sub">logged hours × internal rate</div>
+      </div>
+      <div class="card">
+        <div class="metric-label">Governance items due</div>
+        <div class="metric-value" id="m-gov">—</div>
+        <div class="metric-sub" id="m-gov-sub">next 30 days</div>
+      </div>
+      <div class="card">
+        <div class="metric-label">Pending escalations</div>
+        <div class="metric-value" id="m-esc">—</div>
+        <div class="metric-sub">awaiting your call</div>
+      </div>
+    </div>
+
+    <div class="section-title">Needs your attention</div>
+    <div class="card" id="attention-list"></div>
+
+    <div class="section-title">Note</div>
+    <div class="card" style="font-size:12.5px;color:var(--text-dim);line-height:1.6;">
+      Finance and sales figures here are seeded from what you enter manually or tell Helm in chat — there's no live POS or PP Command backend connected yet. Once that integration exists, replace the storage layer in this file with real API calls; the schema (see script tag) is written to match.
+    </div>
+  </div>
+
+  <!-- ESCALATIONS -->
+  <div class="panel" id="panel-escalations">
+    <div class="hint">Sales discounts of 5% or less are auto-approved and never appear here. Discounts above 5% land here with a 4-day auto-execute timer — Helm's recommendation goes through automatically if you don't decline it. Governance, finance, and any non-sales matter never carry a timer and only proceed if you approve them.</div>
+    <div class="section-title">Awaiting your decision</div>
+    <div class="card" id="escalations-list"></div>
+  </div>
+
+  <!-- SALES -->
+  <div class="panel" id="panel-sales">
+    <div class="section-title">Pipeline</div>
+    <div class="card" id="pipeline-list"></div>
+    <div class="section-title">Add opportunity</div>
+    <div class="card">
+      <div class="grid grid-2">
+        <div class="field"><label>Client / prospect</label><input id="pl-client" placeholder="e.g. Acme Aged Care"></div>
+        <div class="field"><label>Stage</label>
+          <select id="pl-stage">
+            <option>Lead</option><option>Quoted</option><option>Negotiating</option><option>Won</option><option>Lost</option>
+          </select>
+        </div>
+        <div class="field"><label>Est. value ($)</label><input id="pl-value" type="number" placeholder="0"></div>
+        <div class="field"><label>Last action</label><input id="pl-action" placeholder="e.g. Sent quote v2"></div>
+      </div>
+      <button class="btn" onclick="addPipelineItem()">Add to pipeline</button>
+    </div>
+  </div>
+
+  <!-- LEADS -->
+  <div class="panel" id="panel-leads">
+    <div class="hint">Helm finds leads two ways: ask it to search the web against criteria in the Ask Helm tab, or paste a list here. Chasing a lead creates a ready-to-send Gmail draft — nothing is queued for approval, since that's routine per the authority framework.</div>
+    <div class="section-title">Tracked leads</div>
+    <div class="card" id="leads-list"></div>
+    <div class="section-title">Paste a list</div>
+    <div class="card">
+      <div class="field"><label>One per line — name, company, email, source</label>
+        <textarea id="leads-bulk" placeholder="Sam Lee, Sunrise Aged Care, sam@sunriseaged.com.au, Referral"></textarea>
+      </div>
+      <button class="btn" onclick="addBulkLeads()">Add to leads</button>
+    </div>
+  </div>
+
+  <!-- FINANCE -->
+  <div class="panel" id="panel-finance">
+    <div class="section-title">Revenue &amp; cost tracking</div>
+    <div class="card">
+      <div class="grid grid-2">
+        <div class="field"><label>Revenue YTD ($)</label><input id="fin-revenue" type="number"></div>
+        <div class="field"><label>Costs YTD ($)</label><input id="fin-costs" type="number"></div>
+      </div>
+      <button class="btn" onclick="saveFinancials()">Save</button>
+    </div>
+    <div class="section-title">Notes</div>
+    <div class="card" id="fin-notes-list"></div>
+    <div class="card">
+      <div class="field"><label>Add finance note</label><textarea id="fin-note-input" placeholder="e.g. Margin on Tier 2 clients tightening due to..."></textarea></div>
+      <button class="btn" onclick="addFinanceNote()">Add note</button>
+    </div>
+  </div>
+
+  <!-- GOVERNANCE -->
+  <div class="panel" id="panel-governance">
+    <div class="section-title">Governance &amp; compliance items</div>
+    <div class="card" id="governance-list"></div>
+    <div class="section-title">Add item</div>
+    <div class="card">
+      <div class="grid grid-2">
+        <div class="field"><label>Title</label><input id="gov-title" placeholder="e.g. Renew Anthropic DPA"></div>
+        <div class="field"><label>Category</label>
+          <select id="gov-category">
+            <option>Company/legal</option><option>IP &amp; contracts</option><option>Data/privacy</option><option>Other</option>
+          </select>
+        </div>
+        <div class="field"><label>Status</label>
+          <select id="gov-status">
+            <option value="ok">On track</option><option value="due-soon">Due soon</option><option value="overdue">Overdue</option>
+          </select>
+        </div>
+        <div class="field"><label>Due date</label><input id="gov-due" type="date"></div>
+      </div>
+      <div class="field"><label>Notes</label><textarea id="gov-notes" placeholder="Context or next step"></textarea></div>
+      <button class="btn" onclick="addGovernanceItem()">Add item</button>
+    </div>
+  </div>
+
+  <!-- AGENT -->
+  <div class="panel" id="panel-agent">
+    <div class="section-title">Ask Helm</div>
+    <div class="hint">Helm can log finance notes, flag governance items, update the pipeline, search the web for leads, and draft outreach emails via Gmail — all logged automatically. Anything touching pricing bands, contracts, spend, or hiring goes to the Escalations queue instead of acting immediately. Note: Gmail drafts are created ready-to-send but not actually sent — there's no send tool available yet.</div>
+    <div class="card">
+      <div class="chat-log" id="chat-log"></div>
+      <div class="chat-input-row">
+        <input id="chat-input" placeholder="e.g. Follow up on the Acme quote, and flag the ASIC renewal coming up" onkeydown="if(event.key==='Enter')sendChat()">
+        <button onclick="sendChat()">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOG -->
+  <div class="panel" id="panel-log">
+    <div class="section-title">Audit log</div>
+    <div class="card" id="audit-log-list"></div>
+  </div>
+
+</div>
+
+<script>
+/* ---------- state schema ----------
+{
+  escalations: [{id, domain, title, recommendation, detail, status, createdAt, resolvedAt}],
+  governanceItems: [{id, title, category, status, dueDate, notes, createdAt}],
+  pipeline: [{id, client, stage, value, lastAction, updatedAt}],
+  leads: [{id, name, company, email, source, status, notes, foundAt}],
+  financials: { revenueYTD, costsYTD, notes: [{id, ts, note}] },
+  auditLog: [{id, ts, action, domain, autoActed}],
+  chatHistory: [{role, content}]
+}
+------------------------------------ */
+
+const STORAGE_KEY = 'helm-state';
+let state = {
+  escalations: [], governanceItems: [], pipeline: [], leads: [],
+  financials: { revenueYTD: 0, costsYTD: 0, notes: [] },
+  auditLog: [], chatHistory: []
+};
+
+function uid(){ return Math.random().toString(36).slice(2, 10); }
+function fmtMoney(n){ return '$' + Number(n||0).toLocaleString(undefined,{maximumFractionDigits:0}); }
+function fmtTime(ts){ return new Date(ts).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); }
+
+async function loadState(){
+  try{
+    const res = await window.storage.get(STORAGE_KEY, false);
+    if(res && res.value){ state = JSON.parse(res.value); }
+    document.getElementById('storage-status').textContent = 'Synced';
+  }catch(e){
+    document.getElementById('storage-status').textContent = 'New session';
+  }
+  renderAll();
+}
+
+async function saveState(){
+  try{
+    await window.storage.set(STORAGE_KEY, JSON.stringify(state), false);
+  }catch(e){ console.error('Storage error', e); }
+}
+
+function logAudit(action, domain, autoActed){
+  state.auditLog.unshift({ id: uid(), ts: Date.now(), action, domain, autoActed });
+  state.auditLog = state.auditLog.slice(0, 200);
+}
+
+/* ---------- navigation ---------- */
+document.querySelectorAll('nav button').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('nav button').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('panel-' + btn.dataset.panel).classList.add('active');
+  });
+});
+
+/* ---------- rendering ---------- */
+function renderAll(){
+  renderOverview();
+  renderEscalations();
+  renderPipeline();
+  renderLeads();
+  renderFinancials();
+  renderGovernance();
+  renderAuditLog();
+  renderChat();
+}
+
+const leadStatusTag = { new:'tag-status-due', contacted:'tag-auto', replied:'tag-status-ok', lost:'tag-status-overdue' };
+const leadStatusLabel = { new:'New', contacted:'Contacted', replied:'Replied', lost:'Lost' };
+
+function renderLeads(){
+  const list = document.getElementById('leads-list');
+  if(!state.leads.length){ list.innerHTML = '<div class="empty">No leads tracked yet.</div>'; return; }
+  list.innerHTML = state.leads.slice().sort((a,b)=>b.foundAt-a.foundAt).map(l=>`
+    <div class="row">
+      <div class="row-main">
+        <div class="row-title">${esc(l.name)}${l.company ? ' — ' + esc(l.company) : ''} <span class="tag ${leadStatusTag[l.status]||'tag-status-due'}">${leadStatusLabel[l.status]||l.status}</span></div>
+        <div class="row-detail">${esc(l.email||'no email on file')} · source: ${esc(l.source||'unspecified')}</div>
+        ${l.notes ? `<div class="row-detail">${esc(l.notes)}</div>` : ''}
+      </div>
+      <div class="btn-group">
+        <button class="btn" onclick="markLeadStatus('${l.id}','contacted')">Mark contacted</button>
+      </div>
+    </div>`).join('');
+}
+
+function markLeadStatus(id, status){
+  const lead = state.leads.find(l=>l.id===id);
+  if(!lead) return;
+  lead.status = status;
+  logAudit(`Marked lead as ${status}: ${lead.name}`, 'Sales & Growth', true);
+  saveState(); renderAll();
+}
+
+function addBulkLeads(){
+  const raw = document.getElementById('leads-bulk').value.trim();
+  if(!raw) return;
+  const lines = raw.split('\n').map(l=>l.trim()).filter(Boolean);
+  lines.forEach(line=>{
+    const [name, company, email, source] = line.split(',').map(s=>s && s.trim());
+    if(!name) return;
+    state.leads.push({ id: uid(), name, company: company||'', email: email||'', source: source||'Supplied list', status:'new', notes:'', foundAt: Date.now() });
+  });
+  logAudit(`Added ${lines.length} lead(s) from a supplied list`, 'Sales & Growth', true);
+  document.getElementById('leads-bulk').value = '';
+  saveState(); renderAll();
+}
+
+function renderOverview(){
+  const pipelineValue = state.pipeline.filter(p=>p.stage!=='Lost').reduce((s,p)=>s+Number(p.value||0),0);
+  const cos = state.financials.costsYTD || 0;
+  const govDue = state.governanceItems.filter(g=>g.status!=='ok').length;
+  const pendingEsc = state.escalations.filter(e=>e.status==='pending').length;
+
+  document.getElementById('m-pipeline').textContent = fmtMoney(pipelineValue);
+  document.getElementById('m-pipeline-sub').textContent = state.pipeline.filter(p=>p.stage!=='Lost').length + ' open opportunities';
+  document.getElementById('m-cos').textContent = fmtMoney(cos);
+  document.getElementById('m-gov').textContent = govDue;
+  document.getElementById('m-esc').textContent = pendingEsc;
+
+  const badge = document.getElementById('esc-badge');
+  if(pendingEsc > 0){ badge.style.display='inline-block'; badge.textContent = pendingEsc; }
+  else{ badge.style.display='none'; }
+
+  const attn = document.getElementById('attention-list');
+  const items = [];
+  state.escalations.filter(e=>e.status==='pending').forEach(e=> items.push({label: e.title, tag:'Escalation', panel:'escalations'}));
+  state.governanceItems.filter(g=>g.status==='overdue').forEach(g=> items.push({label: g.title, tag:'Overdue', panel:'governance'}));
+  state.governanceItems.filter(g=>g.status==='due-soon').forEach(g=> items.push({label: g.title, tag:'Due soon', panel:'governance'}));
+
+  attn.innerHTML = items.length ? items.map(i=>`<div class="row"><div class="row-main"><div class="row-title">${esc(i.label)}</div></div><span class="tag tag-escalate">${i.tag}</span></div>`).join('') : '<div class="empty">Nothing needs attention right now.</div>';
+}
+
+function renderEscalations(){
+  const list = document.getElementById('escalations-list');
+  const pending = state.escalations.filter(e=>e.status==='pending');
+  if(!pending.length){ list.innerHTML = '<div class="empty">No pending escalations.</div>'; return; }
+  list.innerHTML = pending.map(e=>{
+    let timerHtml = '<span class="tag tag-status-overdue">No timer — manual approval required</span>';
+    if(e.autoExecuteAt){
+      const msLeft = e.autoExecuteAt - Date.now();
+      const hrsLeft = Math.max(0, Math.ceil(msLeft / (60*60*1000)));
+      const daysLeft = Math.floor(hrsLeft / 24);
+      const remHrs = hrsLeft % 24;
+      timerHtml = `<span class="tag tag-status-due">Auto-executes in ${daysLeft}d ${remHrs}h unless declined</span>`;
+    }
+    return `
+    <div class="row">
+      <div class="row-main">
+        <span class="tag tag-escalate">${esc(e.domain)}</span>
+        <div class="row-title" style="margin-top:6px;">${esc(e.title)}</div>
+        <div class="row-detail">${esc(e.detail)}</div>
+        <div class="row-rec">Helm's recommendation: ${esc(e.recommendation)}</div>
+        <div style="margin-top:8px;">${timerHtml}</div>
+      </div>
+      <div class="btn-group">
+        <button class="btn btn-approve" onclick="resolveEscalation('${e.id}','approved')">Approve</button>
+        <button class="btn btn-decline" onclick="resolveEscalation('${e.id}','declined')">Decline</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function checkAutoExecutions(){
+  const now = Date.now();
+  let changed = false;
+  state.escalations.forEach(e=>{
+    if(e.status==='pending' && e.autoExecuteAt && now >= e.autoExecuteAt){
+      e.status = 'approved';
+      e.resolvedAt = now;
+      e.autoExecuted = true;
+      logAudit(`Auto-executed after 4-day window (not declined): ${e.title}`, e.domain, true);
+      changed = true;
+    }
+  });
+  if(changed){ saveState(); renderAll(); }
+}
+
+function resolveEscalation(id, status){
+  const item = state.escalations.find(e=>e.id===id);
+  if(!item) return;
+  item.status = status;
+  item.resolvedAt = Date.now();
+  logAudit(`${status === 'approved' ? 'Approved' : 'Declined'}: ${item.title}`, item.domain, false);
+  saveState(); renderAll();
+}
+
+function renderPipeline(){
+  const list = document.getElementById('pipeline-list');
+  if(!state.pipeline.length){ list.innerHTML = '<div class="empty">No opportunities logged yet.</div>'; return; }
+  list.innerHTML = state.pipeline.slice().sort((a,b)=>b.updatedAt-a.updatedAt).map(p=>`
+    <div class="row">
+      <div class="row-main">
+        <div class="row-title">${esc(p.client)} <span class="tag tag-auto">${esc(p.stage)}</span></div>
+        <div class="row-detail">${fmtMoney(p.value)} — ${esc(p.lastAction||'')}</div>
+      </div>
+    </div>`).join('');
+}
+
+function addPipelineItem(){
+  const client = document.getElementById('pl-client').value.trim();
+  if(!client) return;
+  state.pipeline.push({
+    id: uid(), client,
+    stage: document.getElementById('pl-stage').value,
+    value: Number(document.getElementById('pl-value').value || 0),
+    lastAction: document.getElementById('pl-action').value.trim(),
+    updatedAt: Date.now()
+  });
+  logAudit(`Added pipeline item: ${client}`, 'Sales & Growth', true);
+  document.getElementById('pl-client').value='';
+  document.getElementById('pl-value').value='';
+  document.getElementById('pl-action').value='';
+  saveState(); renderAll();
+}
+
+function renderFinancials(){
+  document.getElementById('fin-revenue').value = state.financials.revenueYTD || '';
+  document.getElementById('fin-costs').value = state.financials.costsYTD || '';
+  const list = document.getElementById('fin-notes-list');
+  const notes = state.financials.notes || [];
+  list.innerHTML = notes.length ? notes.slice().reverse().map(n=>`
+    <div class="row"><div class="row-main"><div class="row-detail">${esc(n.note)}</div></div>
+    <span class="row-detail">${fmtTime(n.ts)}</span></div>`).join('') : '<div class="empty">No finance notes yet.</div>';
+}
+
+function saveFinancials(){
+  state.financials.revenueYTD = Number(document.getElementById('fin-revenue').value || 0);
+  state.financials.costsYTD = Number(document.getElementById('fin-costs').value || 0);
+  logAudit('Updated revenue/cost figures', 'Finance', true);
+  saveState(); renderAll();
+}
+
+function addFinanceNote(){
+  const note = document.getElementById('fin-note-input').value.trim();
+  if(!note) return;
+  state.financials.notes = state.financials.notes || [];
+  state.financials.notes.push({ id: uid(), ts: Date.now(), note });
+  logAudit('Added finance note', 'Finance', true);
+  document.getElementById('fin-note-input').value='';
+  saveState(); renderAll();
+}
+
+function renderGovernance(){
+  const list = document.getElementById('governance-list');
+  if(!state.governanceItems.length){ list.innerHTML = '<div class="empty">No governance items tracked yet.</div>'; return; }
+  const tagClass = { ok:'tag-status-ok', 'due-soon':'tag-status-due', overdue:'tag-status-overdue' };
+  const tagLabel = { ok:'On track', 'due-soon':'Due soon', overdue:'Overdue' };
+  list.innerHTML = state.governanceItems.slice().sort((a,b)=>b.createdAt-a.createdAt).map(g=>`
+    <div class="row">
+      <div class="row-main">
+        <div class="row-title">${esc(g.title)} <span class="tag ${tagClass[g.status]}">${tagLabel[g.status]}</span></div>
+        <div class="row-detail">${esc(g.category)}${g.dueDate ? ' · due ' + esc(g.dueDate) : ''}</div>
+        ${g.notes ? `<div class="row-detail">${esc(g.notes)}</div>` : ''}
+      </div>
+    </div>`).join('');
+}
+
+function addGovernanceItem(){
+  const title = document.getElementById('gov-title').value.trim();
+  if(!title) return;
+  state.governanceItems.push({
+    id: uid(), title,
+    category: document.getElementById('gov-category').value,
+    status: document.getElementById('gov-status').value,
+    dueDate: document.getElementById('gov-due').value,
+    notes: document.getElementById('gov-notes').value.trim(),
+    createdAt: Date.now()
+  });
+  logAudit(`Logged governance item: ${title}`, 'Governance', true);
+  document.getElementById('gov-title').value='';
+  document.getElementById('gov-notes').value='';
+  document.getElementById('gov-due').value='';
+  saveState(); renderAll();
+}
+
+function renderAuditLog(){
+  const list = document.getElementById('audit-log-list');
+  if(!state.auditLog.length){ list.innerHTML = '<div class="empty">No activity logged yet.</div>'; return; }
+  list.innerHTML = state.auditLog.map(a=>`
+    <div class="audit-entry">
+      <span class="audit-time">${fmtTime(a.ts)}</span>
+      <span>${a.autoActed ? '<span class="tag tag-auto" style="margin-right:8px;">Auto</span>' : ''}${esc(a.action)} <span style="color:var(--text-muted)">— ${esc(a.domain)}</span></span>
+    </div>`).join('');
+}
+
+function renderChat(){
+  const log = document.getElementById('chat-log');
+  if(!state.chatHistory.length){
+    log.innerHTML = '<div class="msg system">Ask Helm to prioritise the pipeline, flag a compliance deadline, log a finance note, or propose something that needs your approval.</div>';
+    return;
+  }
+  log.innerHTML = state.chatHistory.map(m=>`<div class="msg ${m.role}">${esc(m.content)}</div>`).join('');
+  log.scrollTop = log.scrollHeight;
+}
+
+function esc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* ---------- Helm tool-calling loop ---------- */
+const HELM_SYSTEM_PROMPT = `You are Helm, the top-level oversight agent for Perpetual Pantries (a café operations SaaS company). You sit above Canopy (sales/client ops), Ronin (per-client), and Gavin (per-site) in the agent hierarchy, but in this scaffold you only have direct tools for pipeline, finance, and governance tracking.
+
+Authority rules:
+- You can call log_finance_note, update_pipeline, log_governance_item, and log_lead directly — these are routine, reversible, and get logged to the audit trail automatically.
+- Sales discounting has a bounded-autonomy rule: call propose_sales_discount whenever a deal involves a discount off list price. Discounts of 5 percent or less are auto-approved on the spot — you may act immediately and tell Josh what you did. Discounts above 5 percent are queued as a timed escalation: it auto-executes in 4 days unless Josh declines it in that window. Never skip this tool and apply a discount silently.
+- For anything else outside Sales — a new contract term, a spend commitment, a hiring decision, or any Governance/Finance matter — you MUST call propose_escalation instead of acting directly. These have no cap and no timer; they only execute if Josh explicitly approves. Never claim to have done one of these things — only propose it.
+- To find leads, use the web_search tool against whatever criteria Josh gives you (industry, region, business type), then call log_lead for each qualified prospect you find.
+- To chase a lead by email, use the Gmail create_draft tool to write the email, then call mark_lead_contacted. Be upfront that this only creates a draft — the connected Gmail integration has no send tool, so it cannot actually dispatch the email itself. Say clearly that the draft is ready to send from Gmail, never claim you sent it.
+- Be concise. Explain briefly what you did or what you're escalating and why.`;
+
+const HELM_TOOLS = [
+  {
+    name: "log_finance_note",
+    description: "Log a note about financial performance, margin, or cost observations. Routine, auto-acted.",
+    input_schema: { type: "object", properties: { note: { type: "string" } }, required: ["note"] }
+  },
+  {
+    name: "update_pipeline",
+    description: "Add or update a sales pipeline opportunity. Routine, auto-acted.",
+    input_schema: {
+      type: "object",
+      properties: {
+        client: { type: "string" },
+        stage: { type: "string", enum: ["Lead","Quoted","Negotiating","Won","Lost"] },
+        value: { type: "number" },
+        note: { type: "string" }
+      },
+      required: ["client","stage"]
+    }
+  },
+  {
+    name: "log_governance_item",
+    description: "Log or flag a governance/compliance item (legal, IP, data, ASIC, contracts). Routine, auto-acted.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        category: { type: "string" },
+        status: { type: "string", enum: ["ok","due-soon","overdue"] },
+        notes: { type: "string" }
+      },
+      required: ["title","category","status"]
+    }
+  },
+  {
+    name: "propose_sales_discount",
+    description: "Handle any discount off list price for a sales deal. Discounts up to and including 5 percent auto-approve immediately. Above 5 percent, this queues a timed escalation that auto-executes in 4 days unless Josh declines it.",
+    input_schema: {
+      type: "object",
+      properties: {
+        client: { type: "string" },
+        discount_percent: { type: "number" },
+        detail: { type: "string" },
+        recommendation: { type: "string" }
+      },
+      required: ["client","discount_percent","detail"]
+    }
+  },
+  {
+    name: "log_lead",
+    description: "Log a prospect found via web search or otherwise qualified as a lead. Routine, auto-acted.",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        company: { type: "string" },
+        email: { type: "string" },
+        source: { type: "string" },
+        notes: { type: "string" }
+      },
+      required: ["name"]
+    }
+  },
+  {
+    name: "mark_lead_contacted",
+    description: "Mark a tracked lead as contacted, after drafting an outreach email for them.",
+    input_schema: {
+      type: "object",
+      properties: { name: { type: "string" } },
+      required: ["name"]
+    }
+  },
+  {
+    name: "propose_escalation",
+    description: "Raise something that needs Josh's approval before it happens: pricing outside bands, new contract terms, spend commitments, hiring. Never executes anything itself — just queues the decision with your recommendation.",
+    input_schema: {
+      type: "object",
+      properties: {
+        domain: { type: "string", enum: ["Sales & Growth","Finance","Governance","Operations"] },
+        title: { type: "string" },
+        detail: { type: "string" },
+        recommendation: { type: "string" }
+      },
+      required: ["domain","title","detail","recommendation"]
+    }
+  }
+];
+
+function executeTool(name, input){
+  switch(name){
+    case 'log_finance_note':
+      state.financials.notes = state.financials.notes || [];
+      state.financials.notes.push({ id: uid(), ts: Date.now(), note: input.note });
+      logAudit('Logged finance note (via Helm)', 'Finance', true);
+      return 'Logged.';
+    case 'update_pipeline':
+      state.pipeline.push({
+        id: uid(), client: input.client, stage: input.stage,
+        value: Number(input.value||0), lastAction: input.note||'', updatedAt: Date.now()
+      });
+      logAudit(`Updated pipeline (via Helm): ${input.client}`, 'Sales & Growth', true);
+      return 'Pipeline updated.';
+    case 'log_governance_item':
+      state.governanceItems.push({
+        id: uid(), title: input.title, category: input.category,
+        status: input.status, dueDate: '', notes: input.notes||'', createdAt: Date.now()
+      });
+      logAudit(`Logged governance item (via Helm): ${input.title}`, 'Governance', true);
+      return 'Governance item logged.';
+    case 'log_lead':
+      state.leads.push({
+        id: uid(), name: input.name, company: input.company||'', email: input.email||'',
+        source: input.source||'Web search', status:'new', notes: input.notes||'', foundAt: Date.now()
+      });
+      logAudit(`Logged lead (via Helm): ${input.name}`, 'Sales & Growth', true);
+      return 'Lead logged.';
+    case 'mark_lead_contacted': {
+      const lead = state.leads.find(l=>l.name.toLowerCase() === String(input.name||'').toLowerCase());
+      if(lead){ lead.status = 'contacted'; }
+      logAudit(`Drafted outreach email (via Helm): ${input.name}`, 'Sales & Growth', true);
+      return lead ? 'Marked as contacted.' : 'No matching tracked lead found — logging the contact anyway.';
+    }
+    case 'propose_sales_discount': {
+      const pct = Number(input.discount_percent) || 0;
+      if(pct <= 5){
+        logAudit(`Auto-approved ${pct}% discount for ${input.client}`, 'Sales & Growth', true);
+        return `Auto-approved: ${pct}% is within the 5% cap. Proceed and tell Josh what happened.`;
+      }else{
+        const now = Date.now();
+        state.escalations.push({
+          id: uid(), domain: 'Sales & Growth',
+          title: `${pct}% discount for ${input.client} (above 5% cap)`,
+          detail: input.detail||'', recommendation: input.recommendation||'',
+          status: 'pending', createdAt: now,
+          autoExecuteAt: now + (4*24*60*60*1000), capped: false
+        });
+        logAudit(`Queued timed escalation: ${pct}% discount for ${input.client}`, 'Sales & Growth', false);
+        return `Above the 5% cap — queued as a timed escalation. It will auto-execute in 4 days unless Josh declines it.`;
+      }
+    }
+    case 'propose_escalation':
+      state.escalations.push({
+        id: uid(), domain: input.domain, title: input.title,
+        detail: input.detail, recommendation: input.recommendation,
+        status: 'pending', createdAt: Date.now(), autoExecuteAt: null
+      });
+      logAudit(`Raised escalation: ${input.title}`, input.domain, false);
+      return 'Escalation queued for your approval. No timer — this only proceeds if Josh explicitly approves it.';
+    default:
+      return 'Unknown tool.';
+  }
+}
+
+async function sendChat(){
+  const input = document.getElementById('chat-input');
+  const text = input.value.trim();
+  if(!text) return;
+  input.value = '';
+  state.chatHistory.push({ role:'user', content:text });
+  renderChat(); saveState();
+
+  const apiMessages = state.chatHistory
+    .filter(m=>m.role==='user' || m.role==='helm')
+    .map(m=>({ role: m.role==='helm'?'assistant':'user', content: m.content }));
+
+  try{
+    let response = await callClaude(apiMessages);
+    let guard = 0;
+    while(response.stop_reason === 'tool_use' && guard < 5){
+      guard++;
+      const toolResults = [];
+      const assistantContent = response.content;
+      for(const block of assistantContent){
+        if(block.type === 'tool_use'){
+          const result = executeTool(block.name, block.input);
+          toolResults.push({ type:'tool_result', tool_use_id: block.id, content: result });
+        }
+      }
+      apiMessages.push({ role:'assistant', content: assistantContent });
+      apiMessages.push({ role:'user', content: toolResults });
+      response = await callClaude(apiMessages);
+    }
+    const textBlock = (response.content||[]).find(b=>b.type==='text');
+    const reply = textBlock ? textBlock.text : '(no response)';
+    state.chatHistory.push({ role:'helm', content: reply });
+  }catch(e){
+    state.chatHistory.push({ role:'system', content: 'Helm could not reach the API: ' + e.message });
+  }
+  renderAll(); saveState();
+}
+
+async function callClaude(messages){
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1500,
+      system: HELM_SYSTEM_PROMPT,
+      tools: [...HELM_TOOLS, { type: 'web_search_20250305', name: 'web_search' }],
+      mcp_servers: [
+        { type: 'url', url: 'https://gmailmcp.googleapis.com/mcp/v1', name: 'gmail-mcp' }
+      ],
+      messages
+    })
+  });
+  return await res.json();
+}
+
+loadState().then(()=>{
+  checkAutoExecutions();
+  setInterval(checkAutoExecutions, 60*1000);
+});
+</script>
+</body>
+</html>
