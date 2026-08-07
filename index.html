@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Helm</title>
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<header>
+  <div>
+    <h1>Helm</h1>
+    <p>Company-wide agent for Perpetual Pantries — acts on routine work, escalates the rest.</p>
+  </div>
+  <div class="token-row">
+    <input id="token" type="password" placeholder="admin token" />
+    <button id="save-token">Save</button>
+    <button id="run-review" class="primary">Run review now</button>
+  </div>
+</header>
+
+<main>
+  <section>
+    <div class="section-head">
+      <h2>Waiting on you</h2>
+    </div>
+    <div id="pending-list"></div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <h2>Recent activity</h2>
+    </div>
+    <div id="activity-list"></div>
+  </section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>
