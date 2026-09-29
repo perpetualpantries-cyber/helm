@@ -147,7 +147,7 @@
 
     <div class="section-title">Note</div>
     <div class="card" style="font-size:12.5px;color:var(--text-dim);line-height:1.6;">
-      Finance and sales figures here are seeded from what you enter manually or tell Helm in chat — there's no live POS or PP Command backend connected yet. Once that integration exists, replace the storage layer in this file with real API calls; the schema (see script tag) is written to match.
+      Revenue and costs come from live café data once Canopy is connected (Finance → Live site data). Until then they're whatever you enter manually or tell Helm in chat. Pipeline, leads and governance are still tracked here only.
     </div>
   </div>
 
@@ -194,6 +194,17 @@
 
   <!-- FINANCE -->
   <div class="panel" id="panel-finance">
+    <div class="section-title">Live site data (Canopy)</div>
+    <div class="card">
+      <div class="grid grid-2">
+        <div class="field"><label>Canopy URL</label><input id="canopy-url" placeholder="https://your-project.vercel.app"></div>
+        <div class="field"><label>Read token</label><input id="canopy-token" type="password" placeholder="CANOPY_READ_TOKEN"></div>
+      </div>
+      <button class="btn" onclick="saveCanopyConfig()">Connect &amp; sync</button>
+      <span class="row-detail" id="canopy-status" style="margin-left:10px;"></span>
+    </div>
+    <div class="card" id="canopy-sites"></div>
+
     <div class="section-title">Revenue &amp; cost tracking</div>
     <div class="card">
       <div class="grid grid-2">
@@ -263,7 +274,8 @@
   governanceItems: [{id, title, category, status, dueDate, notes, createdAt}],
   pipeline: [{id, client, stage, value, lastAction, updatedAt}],
   leads: [{id, name, company, email, source, status, notes, foundAt}],
-  financials: { revenueYTD, costsYTD, notes: [{id, ts, note}] },
+  financials: { revenueYTD, costsYTD, source, notes: [{id, ts, note}] },
+  canopy: null | { asOf, from, totals, clients: [{id, name, revenue, costs, covers, sites: [...]}] },
   auditLog: [{id, ts, action, domain, autoActed}],
   chatHistory: [{role, content}]
 }
@@ -319,6 +331,7 @@ function renderAll(){
   renderPipeline();
   renderLeads();
   renderFinancials();
+  renderCanopy();
   renderGovernance();
   renderAuditLog();
   renderChat();
@@ -483,7 +496,71 @@ function renderFinancials(){
     <span class="row-detail">${fmtTime(n.ts)}</span></div>`).join('') : '<div class="empty">No finance notes yet.</div>';
 }
 
+/* ---------- Canopy (live site data) ---------- */
+const CANOPY_CONFIG_KEY = 'helm-canopy-config';
+let canopyConfig = { url: '', token: '' };
+
+async function loadCanopyConfig(){
+  try{
+    const res = await window.storage.get(CANOPY_CONFIG_KEY, false);
+    if(res && res.value) canopyConfig = JSON.parse(res.value);
+  }catch(e){}
+  document.getElementById('canopy-url').value = canopyConfig.url || '';
+  document.getElementById('canopy-token').value = canopyConfig.token || '';
+}
+
+async function saveCanopyConfig(){
+  canopyConfig = {
+    url: document.getElementById('canopy-url').value.trim().replace(/\/+$/, ''),
+    token: document.getElementById('canopy-token').value.trim()
+  };
+  try{ await window.storage.set(CANOPY_CONFIG_KEY, JSON.stringify(canopyConfig), false); }catch(e){ console.error('Storage error', e); }
+  await syncCanopy();
+}
+
+async function syncCanopy(){
+  const status = document.getElementById('canopy-status');
+  if(!canopyConfig.url || !canopyConfig.token){ status.textContent = 'Not connected'; return; }
+  status.textContent = 'Syncing…';
+  try{
+    const res = await fetch(canopyConfig.url + '/api/canopy/summary', {
+      headers: { 'Authorization': 'Bearer ' + canopyConfig.token }
+    });
+    const body = await res.json();
+    if(!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
+    state.canopy = body;
+    state.financials.revenueYTD = body.totals.revenue;
+    state.financials.costsYTD = body.totals.costs;
+    state.financials.source = 'canopy';
+    status.textContent = 'Synced ' + fmtTime(Date.parse(body.asOf));
+    saveState(); renderAll();
+  }catch(e){
+    status.textContent = 'Sync failed: ' + e.message;
+  }
+}
+
+function renderCanopy(){
+  const el = document.getElementById('canopy-sites');
+  const c = state.canopy;
+  if(!c || !c.clients.length){ el.innerHTML = '<div class="empty">No site data yet. Connect Canopy above, then have a café send its end-of-day close.</div>'; return; }
+  el.innerHTML = `<div class="row-detail" style="margin-bottom:8px;">Since ${esc(c.from)} · ${c.totals.activeSites} active site(s) · revenue ${fmtMoney(c.totals.revenue)} · costs ${fmtMoney(c.totals.costs)}</div>` +
+    c.clients.map(cl=>`
+    <div class="row"><div class="row-main">
+      <div class="row-title">${esc(cl.name)} — ${fmtMoney(cl.revenue)} revenue, ${fmtMoney(cl.costs)} costs</div>
+      ${cl.sites.map(s=>`<div class="row-detail">${esc(s.name)}${s.active?'':' (inactive)'}: ${fmtMoney(s.revenue)} / ${fmtMoney(s.costs)} · ${s.covers} covers · last close ${esc(s.lastClose||'never')}</div>`).join('')}
+    </div></div>`).join('');
+}
+
+function canopyContext(){
+  const c = state.canopy;
+  if(!c) return '';
+  const lines = c.clients.map(cl=>`- ${cl.name}: revenue ${fmtMoney(cl.revenue)}, costs ${fmtMoney(cl.costs)}; sites: ` +
+    cl.sites.map(s=>`${s.name} (${fmtMoney(s.revenue)} rev, last close ${s.lastClose||'never'})`).join(', '));
+  return `\n\nLive site data from Canopy since ${c.from} (synced ${c.asOf}):\n` + lines.join('\n');
+}
+
 function saveFinancials(){
+  state.financials.source = 'manual';
   state.financials.revenueYTD = Number(document.getElementById('fin-revenue').value || 0);
   state.financials.costsYTD = Number(document.getElementById('fin-costs').value || 0);
   logAudit('Updated revenue/cost figures', 'Finance', true);
@@ -766,7 +843,7 @@ async function callClaude(messages){
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
       max_tokens: 1500,
-      system: HELM_SYSTEM_PROMPT,
+      system: HELM_SYSTEM_PROMPT + canopyContext(),
       tools: [...HELM_TOOLS, { type: 'web_search_20250305', name: 'web_search' }],
       mcp_servers: [
         { type: 'url', url: 'https://gmailmcp.googleapis.com/mcp/v1', name: 'gmail-mcp' }
@@ -777,7 +854,9 @@ async function callClaude(messages){
   return await res.json();
 }
 
-loadState().then(()=>{
+loadState().then(async ()=>{
+  await loadCanopyConfig();
+  syncCanopy();
   checkAutoExecutions();
   setInterval(checkAutoExecutions, 60*1000);
 });

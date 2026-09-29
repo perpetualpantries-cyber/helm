@@ -1,0 +1,15 @@
+{
+  "name": "helm",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "db:schema": "node scripts/apply-schema.mjs",
+    "site:create": "node scripts/create-site.mjs"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
