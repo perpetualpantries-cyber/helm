@@ -153,7 +153,7 @@
 
   <!-- ESCALATIONS -->
   <div class="panel" id="panel-escalations">
-    <div class="hint">Sales discounts of 5% or less are auto-approved and never appear here. Discounts above 5% land here with a 4-day auto-execute timer — Helm's recommendation goes through automatically if you don't decline it. Governance, finance, and any non-sales matter never carry a timer and only proceed if you approve them.</div>
+    <div class="hint">Sales discounts are auto-approved and never appear here while a client's combined discounts stay at or below 5%. A discount that takes a client above 5% lands here with a 4-day auto-execute timer — Helm's recommendation goes through automatically if you don't decline it. Governance, finance, and any non-sales matter never carry a timer and only proceed if you approve them.</div>
     <div class="section-title">Awaiting your decision</div>
     <div class="card" id="escalations-list"></div>
   </div>
@@ -259,31 +259,40 @@
 <script>
 /* ---------- state schema ----------
 {
-  escalations: [{id, domain, title, recommendation, detail, status, createdAt, resolvedAt}],
+  escalations: [{id, domain, title, recommendation, detail, status, createdAt, resolvedAt, client?, discountPercent?}],
   governanceItems: [{id, title, category, status, dueDate, notes, createdAt}],
   pipeline: [{id, client, stage, value, lastAction, updatedAt}],
   leads: [{id, name, company, email, source, status, notes, foundAt}],
   financials: { revenueYTD, costsYTD, notes: [{id, ts, note}] },
+  discounts: [{id, client, percent, ts}],   // auto-approved discounts, counted toward each client's 5% cap
   auditLog: [{id, ts, action, domain, autoActed}],
   chatHistory: [{role, content}]
 }
 ------------------------------------ */
 
 const STORAGE_KEY = 'helm-state';
-let state = {
-  escalations: [], governanceItems: [], pipeline: [], leads: [],
-  financials: { revenueYTD: 0, costsYTD: 0, notes: [] },
-  auditLog: [], chatHistory: []
-};
+function emptyState(){
+  return {
+    escalations: [], governanceItems: [], pipeline: [], leads: [],
+    financials: { revenueYTD: 0, costsYTD: 0, notes: [] },
+    discounts: [], auditLog: [], chatHistory: []
+  };
+}
+let state = emptyState();
 
 function uid(){ return Math.random().toString(36).slice(2, 10); }
 function fmtMoney(n){ return '$' + Number(n||0).toLocaleString(undefined,{maximumFractionDigits:0}); }
 function fmtTime(ts){ return new Date(ts).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); }
 
+async function readStoredState(){
+  const res = await window.storage.get(STORAGE_KEY, false);
+  return res && res.value ? Object.assign(emptyState(), JSON.parse(res.value)) : null;
+}
+
 async function loadState(){
   try{
-    const res = await window.storage.get(STORAGE_KEY, false);
-    if(res && res.value){ state = JSON.parse(res.value); }
+    const stored = await readStoredState();
+    if(stored){ state = stored; }
     document.getElementById('storage-status').textContent = 'Synced';
   }catch(e){
     document.getElementById('storage-status').textContent = 'New session';
@@ -295,6 +304,25 @@ async function saveState(){
   try{
     await window.storage.set(STORAGE_KEY, JSON.stringify(state), false);
   }catch(e){ console.error('Storage error', e); }
+}
+
+// Every change goes through mutate(). It re-reads the stored state before applying the
+// change, so another open tab's changes (such as a declined escalation) aren't overwritten
+// by this tab's stale copy. Changes within this tab run one at a time.
+let mutateQueue = Promise.resolve();
+function mutate(fn){
+  const run = mutateQueue.then(async ()=>{
+    const before = JSON.stringify(state);
+    try{
+      const stored = await readStoredState();
+      if(stored){ state = stored; }
+    }catch(e){ /* nothing stored yet, or storage unavailable: keep the in-memory state */ }
+    const result = fn();
+    if(JSON.stringify(state) !== before){ await saveState(); renderAll(); }
+    return result;
+  });
+  mutateQueue = run.catch(()=>{});
+  return run;
 }
 
 function logAudit(action, domain, autoActed){
@@ -344,25 +372,27 @@ function renderLeads(){
 }
 
 function markLeadStatus(id, status){
-  const lead = state.leads.find(l=>l.id===id);
-  if(!lead) return;
-  lead.status = status;
-  logAudit(`Marked lead as ${status}: ${lead.name}`, 'Sales & Growth', true);
-  saveState(); renderAll();
+  return mutate(()=>{
+    const lead = state.leads.find(l=>l.id===id);
+    if(!lead) return;
+    lead.status = status;
+    logAudit(`Marked lead as ${status}: ${lead.name}`, 'Sales & Growth', true);
+  });
 }
 
 function addBulkLeads(){
   const raw = document.getElementById('leads-bulk').value.trim();
   if(!raw) return;
   const lines = raw.split('\n').map(l=>l.trim()).filter(Boolean);
-  lines.forEach(line=>{
-    const [name, company, email, source] = line.split(',').map(s=>s && s.trim());
-    if(!name) return;
-    state.leads.push({ id: uid(), name, company: company||'', email: email||'', source: source||'Supplied list', status:'new', notes:'', foundAt: Date.now() });
-  });
-  logAudit(`Added ${lines.length} lead(s) from a supplied list`, 'Sales & Growth', true);
   document.getElementById('leads-bulk').value = '';
-  saveState(); renderAll();
+  return mutate(()=>{
+    lines.forEach(line=>{
+      const [name, company, email, source] = line.split(',').map(s=>s && s.trim());
+      if(!name) return;
+      state.leads.push({ id: uid(), name, company: company||'', email: email||'', source: source||'Supplied list', status:'new', notes:'', foundAt: Date.now() });
+    });
+    logAudit(`Added ${lines.length} lead(s) from a supplied list`, 'Sales & Growth', true);
+  });
 }
 
 function renderOverview(){
@@ -421,27 +451,28 @@ function renderEscalations(){
 }
 
 function checkAutoExecutions(){
-  const now = Date.now();
-  let changed = false;
-  state.escalations.forEach(e=>{
-    if(e.status==='pending' && e.autoExecuteAt && now >= e.autoExecuteAt){
-      e.status = 'approved';
-      e.resolvedAt = now;
-      e.autoExecuted = true;
-      logAudit(`Auto-executed after 4-day window (not declined): ${e.title}`, e.domain, true);
-      changed = true;
-    }
+  return mutate(()=>{
+    const now = Date.now();
+    state.escalations.forEach(e=>{
+      if(e.status==='pending' && e.autoExecuteAt && now >= e.autoExecuteAt){
+        e.status = 'approved';
+        e.resolvedAt = now;
+        e.autoExecuted = true;
+        logAudit(`Auto-executed after 4-day window (not declined): ${e.title}`, e.domain, true);
+      }
+    });
   });
-  if(changed){ saveState(); renderAll(); }
 }
 
 function resolveEscalation(id, status){
-  const item = state.escalations.find(e=>e.id===id);
-  if(!item) return;
-  item.status = status;
-  item.resolvedAt = Date.now();
-  logAudit(`${status === 'approved' ? 'Approved' : 'Declined'}: ${item.title}`, item.domain, false);
-  saveState(); renderAll();
+  return mutate(()=>{
+    const item = state.escalations.find(e=>e.id===id);
+    // Another tab may already have resolved it; the first decision stands.
+    if(!item || item.status !== 'pending') return;
+    item.status = status;
+    item.resolvedAt = Date.now();
+    logAudit(`${status === 'approved' ? 'Approved' : 'Declined'}: ${item.title}`, item.domain, false);
+  });
 }
 
 function renderPipeline(){
@@ -459,23 +490,28 @@ function renderPipeline(){
 function addPipelineItem(){
   const client = document.getElementById('pl-client').value.trim();
   if(!client) return;
-  state.pipeline.push({
+  const item = {
     id: uid(), client,
     stage: document.getElementById('pl-stage').value,
     value: Number(document.getElementById('pl-value').value || 0),
     lastAction: document.getElementById('pl-action').value.trim(),
     updatedAt: Date.now()
-  });
-  logAudit(`Added pipeline item: ${client}`, 'Sales & Growth', true);
+  };
   document.getElementById('pl-client').value='';
   document.getElementById('pl-value').value='';
   document.getElementById('pl-action').value='';
-  saveState(); renderAll();
+  return mutate(()=>{
+    state.pipeline.push(item);
+    logAudit(`Added pipeline item: ${client}`, 'Sales & Growth', true);
+  });
 }
 
 function renderFinancials(){
-  document.getElementById('fin-revenue').value = state.financials.revenueYTD || '';
-  document.getElementById('fin-costs').value = state.financials.costsYTD || '';
+  // Don't overwrite a figure the user is typing when another tab's change triggers a render.
+  const rev = document.getElementById('fin-revenue');
+  const costs = document.getElementById('fin-costs');
+  if(document.activeElement !== rev) rev.value = state.financials.revenueYTD || '';
+  if(document.activeElement !== costs) costs.value = state.financials.costsYTD || '';
   const list = document.getElementById('fin-notes-list');
   const notes = state.financials.notes || [];
   list.innerHTML = notes.length ? notes.slice().reverse().map(n=>`
@@ -484,20 +520,24 @@ function renderFinancials(){
 }
 
 function saveFinancials(){
-  state.financials.revenueYTD = Number(document.getElementById('fin-revenue').value || 0);
-  state.financials.costsYTD = Number(document.getElementById('fin-costs').value || 0);
-  logAudit('Updated revenue/cost figures', 'Finance', true);
-  saveState(); renderAll();
+  const revenueYTD = Number(document.getElementById('fin-revenue').value || 0);
+  const costsYTD = Number(document.getElementById('fin-costs').value || 0);
+  return mutate(()=>{
+    state.financials.revenueYTD = revenueYTD;
+    state.financials.costsYTD = costsYTD;
+    logAudit('Updated revenue/cost figures', 'Finance', true);
+  });
 }
 
 function addFinanceNote(){
   const note = document.getElementById('fin-note-input').value.trim();
   if(!note) return;
-  state.financials.notes = state.financials.notes || [];
-  state.financials.notes.push({ id: uid(), ts: Date.now(), note });
-  logAudit('Added finance note', 'Finance', true);
   document.getElementById('fin-note-input').value='';
-  saveState(); renderAll();
+  return mutate(()=>{
+    state.financials.notes = state.financials.notes || [];
+    state.financials.notes.push({ id: uid(), ts: Date.now(), note });
+    logAudit('Added finance note', 'Finance', true);
+  });
 }
 
 function renderGovernance(){
@@ -518,19 +558,21 @@ function renderGovernance(){
 function addGovernanceItem(){
   const title = document.getElementById('gov-title').value.trim();
   if(!title) return;
-  state.governanceItems.push({
+  const item = {
     id: uid(), title,
     category: document.getElementById('gov-category').value,
     status: document.getElementById('gov-status').value,
     dueDate: document.getElementById('gov-due').value,
     notes: document.getElementById('gov-notes').value.trim(),
     createdAt: Date.now()
-  });
-  logAudit(`Logged governance item: ${title}`, 'Governance', true);
+  };
   document.getElementById('gov-title').value='';
   document.getElementById('gov-notes').value='';
   document.getElementById('gov-due').value='';
-  saveState(); renderAll();
+  return mutate(()=>{
+    state.governanceItems.push(item);
+    logAudit(`Logged governance item: ${title}`, 'Governance', true);
+  });
 }
 
 function renderAuditLog(){
@@ -568,7 +610,7 @@ Multi-region clients:
 
 Authority rules:
 - You can call log_finance_note, update_pipeline, log_governance_item, and log_lead directly — these are routine, reversible, and get logged to the audit trail automatically.
-- Sales discounting has a bounded-autonomy rule: call propose_sales_discount whenever a deal involves a discount off list price. Discounts of 5 percent or less are auto-approved on the spot — you may act immediately and tell Josh what you did. Discounts above 5 percent are queued as a timed escalation: it auto-executes in 4 days unless Josh declines it in that window. Never skip this tool and apply a discount silently.
+- Sales discounting has a bounded-autonomy rule: call propose_sales_discount whenever a deal involves a discount off list price. The 5 percent cap applies to each client's combined discounts, not to each call: while a client's total stays at or below 5 percent, the discount is auto-approved on the spot — you may act immediately and tell Josh what you did. A discount that takes the client's total above 5 percent is queued as a timed escalation: it auto-executes in 4 days unless Josh declines it in that window. Never skip this tool and apply a discount silently.
 - For anything else outside Sales — a new contract term, a spend commitment, a hiring decision, or any Governance/Finance matter — you MUST call propose_escalation instead of acting directly. These have no cap and no timer; they only execute if Josh explicitly approves. Never claim to have done one of these things — only propose it.
 - To find leads, use the web_search tool against whatever criteria Josh gives you (industry, region, business type), then call log_lead for each qualified prospect you find.
 - To chase a lead by email, use the Gmail create_draft tool to write the email, then call mark_lead_contacted. Be upfront that this only creates a draft — the connected Gmail integration has no send tool, so it cannot actually dispatch the email itself. Say clearly that the draft is ready to send from Gmail, never claim you sent it.
@@ -610,7 +652,7 @@ const HELM_TOOLS = [
   },
   {
     name: "propose_sales_discount",
-    description: "Handle any discount off list price for a sales deal. Discounts up to and including 5 percent auto-approve immediately. Above 5 percent, this queues a timed escalation that auto-executes in 4 days unless Josh declines it.",
+    description: "Handle any discount off list price for a sales deal. discount_percent must be a plain number (7.5, not \"7.5%\"). Discounts auto-approve immediately while the client's combined discounts stay at or below 5 percent. A discount that takes the client above 5 percent queues a timed escalation that auto-executes in 4 days unless Josh declines it.",
     input_schema: {
       type: "object",
       properties: {
@@ -662,6 +704,19 @@ const HELM_TOOLS = [
   }
 ];
 
+// Sum of a client's discounts that are approved or still waiting on Josh. Declined ones don't count.
+function discountTotalFor(client){
+  const key = c => String(c||'').trim().toLowerCase().replace(/\s+/g, ' ');
+  const k = key(client);
+  const auto = state.discounts
+    .filter(d=>key(d.client)===k)
+    .reduce((s,d)=>s+d.percent, 0);
+  const escalated = state.escalations
+    .filter(e=>typeof e.discountPercent==='number' && key(e.client)===k && (e.status==='pending' || e.status==='approved'))
+    .reduce((s,e)=>s+e.discountPercent, 0);
+  return auto + escalated;
+}
+
 function executeTool(name, input){
   switch(name){
     case 'log_finance_note':
@@ -697,22 +752,33 @@ function executeTool(name, input){
       return lead ? 'Marked as contacted.' : 'No matching tracked lead found — logging the contact anyway.';
     }
     case 'propose_sales_discount': {
-      const pct = Number(input.discount_percent) || 0;
-      if(pct <= 5){
-        logAudit(`Auto-approved ${pct}% discount for ${input.client}`, 'Sales & Growth', true);
-        return `Auto-approved: ${pct}% is within the 5% cap. Proceed and tell Josh what happened.`;
-      }else{
-        const now = Date.now();
-        state.escalations.push({
-          id: uid(), domain: 'Sales & Growth',
-          title: `${pct}% discount for ${input.client} (above 5% cap)`,
-          detail: input.detail||'', recommendation: input.recommendation||'',
-          status: 'pending', createdAt: now,
-          autoExecuteAt: now + (4*24*60*60*1000), capped: false
-        });
-        logAudit(`Queued timed escalation: ${pct}% discount for ${input.client}`, 'Sales & Growth', false);
-        return `Above the 5% cap — queued as a timed escalation. It will auto-execute in 4 days unless Josh declines it.`;
+      // Only accept a real number: Number("20%") is NaN, which must never read as 0% and auto-approve.
+      const pct = input.discount_percent;
+      if(typeof pct !== 'number' || !Number.isFinite(pct) || pct <= 0 || pct >= 100){
+        return 'Rejected: discount_percent must be a plain number above 0 and below 100 (for example 7.5, not "7.5%"). Nothing was approved or queued.';
       }
+      const client = String(input.client||'').trim();
+      if(!client) return 'Rejected: client is required. Nothing was approved or queued.';
+      const prior = discountTotalFor(client);
+      const total = Math.round((prior + pct) * 100) / 100;  // so 1.1 + 3.9 counts as 5, not 5.000000000000001
+      if(total <= 5){
+        state.discounts.push({ id: uid(), client, percent: pct, ts: Date.now() });
+        logAudit(`Auto-approved ${pct}% discount for ${client} (client total ${total}%)`, 'Sales & Growth', true);
+        return `Auto-approved: ${client}'s combined discounts are ${total}%, within the 5% cap. Proceed and tell Josh what happened.`;
+      }
+      const now = Date.now();
+      state.escalations.push({
+        id: uid(), domain: 'Sales & Growth',
+        title: prior > 0
+          ? `${pct}% discount for ${client} (client total ${total}%, above 5% cap)`
+          : `${pct}% discount for ${client} (above 5% cap)`,
+        detail: input.detail||'', recommendation: input.recommendation||'',
+        status: 'pending', createdAt: now,
+        autoExecuteAt: now + (4*24*60*60*1000), capped: false,
+        client, discountPercent: pct
+      });
+      logAudit(`Queued timed escalation: ${pct}% discount for ${client} (client total ${total}%)`, 'Sales & Growth', false);
+      return `Above the 5% cap (${client}'s combined discounts would be ${total}%) — queued as a timed escalation. It will auto-execute in 4 days unless Josh declines it.`;
     }
     case 'propose_escalation':
       state.escalations.push({
@@ -732,8 +798,7 @@ async function sendChat(){
   const text = input.value.trim();
   if(!text) return;
   input.value = '';
-  state.chatHistory.push({ role:'user', content:text });
-  renderChat(); saveState();
+  await mutate(()=>{ state.chatHistory.push({ role:'user', content:text }); });
 
   const apiMessages = state.chatHistory
     .filter(m=>m.role==='user' || m.role==='helm')
@@ -748,7 +813,7 @@ async function sendChat(){
       const assistantContent = response.content;
       for(const block of assistantContent){
         if(block.type === 'tool_use'){
-          const result = executeTool(block.name, block.input);
+          const result = await mutate(()=>executeTool(block.name, block.input));
           toolResults.push({ type:'tool_result', tool_use_id: block.id, content: result });
         }
       }
@@ -758,11 +823,10 @@ async function sendChat(){
     }
     const textBlock = (response.content||[]).find(b=>b.type==='text');
     const reply = textBlock ? textBlock.text : '(no response)';
-    state.chatHistory.push({ role:'helm', content: reply });
+    await mutate(()=>{ state.chatHistory.push({ role:'helm', content: reply }); });
   }catch(e){
-    state.chatHistory.push({ role:'system', content: 'Helm could not reach the API: ' + e.message });
+    await mutate(()=>{ state.chatHistory.push({ role:'system', content: 'Helm could not reach the API: ' + e.message }); });
   }
-  renderAll(); saveState();
 }
 
 async function callClaude(messages){
